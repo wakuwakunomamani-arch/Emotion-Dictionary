@@ -1,0 +1,5 @@
+{
+  "name": "Emotion Dictionary",
+  "description": "誰でも感情を追加できる共有の感情リストアプリ。AIが入力された言葉が本当に感情かどうかを判定します。",
+  "requestFramePermissions": []
+}
