@@ -134,9 +134,7 @@ if (process.env.GEMINI_API_KEY) {
       const models = gemini!.models.list();
       console.log("=== Available Gemini Models ===");
       for await (const model of await models) {
-        if (model.supportedActions?.includes("generateContent")) {
-          console.log(" - " + model.name);
-        }
+        console.log(" - " + model.name + " | " + JSON.stringify(model.supportedActions));
       }
       console.log("=== End of Models ===");
     } catch (e: any) {
