@@ -128,28 +128,6 @@ const GEMINI_MODEL = "gemini-2.5-flash";
 if (process.env.GEMINI_API_KEY) {
   gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   console.log("Gemini AI initialized successfully.");
-  // REST APIで利用可能なモデルを確認
-  (async () => {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`
-      );
-      const data = await res.json() as any;
-      console.log("=== Available Gemini Models (v1beta) ===");
-      if (data.models) {
-        for (const m of data.models) {
-          if (m.supportedGenerationMethods?.includes("generateContent")) {
-            console.log(" [generateContent] " + m.name);
-          }
-        }
-      } else {
-        console.log("Response:", JSON.stringify(data));
-      }
-      console.log("=== End of Models ===");
-    } catch (e: any) {
-      console.error("Failed to list models:", e.message);
-    }
-  })();
 } else {
   console.warn("GEMINI_API_KEY not found. AI features will be unavailable.");
 }
@@ -300,8 +278,23 @@ async function startServer() {
     const { input, existingNames } = req.body;
     if (!input) return res.status(400).json({ error: "input required" });
     try {
-      const prompt = `以下の「新しい言葉」が、「既存の感情リスト」の中に、ひらがな・カタカナ・漢字の違いだけで実質的に同じ言葉として既に存在するかどうかを判定してください。
-例えば、「うれしい」と「嬉しい」、「かなしい」と「悲しい」は同じとみなします。
+      const prompt = `あなたは日本語の感情・心理状態の専門家AIです。
+以下の「新しい言葉」が、「既存の感情リスト」の中にすでに実質的に同じ意味・感情として存在するかどうかを判定してください。
+
+【重複とみなす基準】
+1. 表記の違いのみ: ひらがな・カタカナ・漢字が違うだけで同じ言葉
+   例: 「うれしい」＝「嬉しい」、「かなしい」＝「悲しい」
+2. 語形変化: 形容詞・動詞・名詞など品詞が変わっただけで同じ感情を表す
+   例: 「切ない」＝「切なさ」、「悲しい」＝「悲しさ」＝「悲しみ」
+   例: 「イライラする」＝「イライラ」、「不安だ」＝「不安」
+   例: 「美しい」＝「美しさ」、「楽しい」＝「楽しさ」
+3. 同義・類義表現: 異なる言葉だが実質的に同じ感情・心理状態を表す
+   例: 「イライラする」＝「イラ立ち」＝「いらだちを感じる」
+   例: 「心配」＝「不安」（非常に近い感情）
+
+【重複とみなさない基準】
+- 似ているが明確に異なるニュアンスを持つ感情（例: 「悲しい」と「切ない」は異なる）
+- 強度が大きく異なる（例: 「不満」と「怒り」）
 
 新しい言葉: 「${input}」
 既存の感情リスト: ${JSON.stringify(existingNames)}
