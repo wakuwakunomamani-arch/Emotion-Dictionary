@@ -123,7 +123,7 @@ seedDatabase();
 
 // Initialize Gemini AI
 let gemini: GoogleGenAI | null = null;
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
 
 if (process.env.GEMINI_API_KEY) {
   gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
