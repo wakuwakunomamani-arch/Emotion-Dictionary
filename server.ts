@@ -128,6 +128,21 @@ const GEMINI_MODEL = "gemini-2.5-flash-preview-04-17";
 if (process.env.GEMINI_API_KEY) {
   gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   console.log("Gemini AI initialized successfully.");
+  // 利用可能なモデルをログに出力（デバッグ用）
+  (async () => {
+    try {
+      const models = gemini!.models.list();
+      console.log("=== Available Gemini Models ===");
+      for await (const model of await models) {
+        if (model.supportedActions?.includes("generateContent")) {
+          console.log(" - " + model.name);
+        }
+      }
+      console.log("=== End of Models ===");
+    } catch (e: any) {
+      console.error("Failed to list models:", e.message);
+    }
+  })();
 } else {
   console.warn("GEMINI_API_KEY not found. AI features will be unavailable.");
 }
