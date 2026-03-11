@@ -1,10 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { GoogleGenAI, Type } from "@google/genai";
 import { Loader2, Plus, AlertCircle, CheckCircle2, Info, X, Layers } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-
-// Initialize Gemini API
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 interface Emotion {
   id: string;
@@ -39,13 +35,6 @@ export default function App() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   useEffect(() => {
-    // APIキーの確認
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("GEMINI_API_KEY is not set!");
-      setMessage({ type: "error", text: "GeminiのAPIキーが設定されていません。Renderの環境変数を確認してください。" });
-    } else {
-      console.log("GEMINI_API_KEY is set, length:", process.env.GEMINI_API_KEY.length);
-    }
     fetchEmotions();
   }, []);
 
@@ -66,30 +55,12 @@ export default function App() {
 
   const generateEmotionDetails = async (emotionName: string) => {
     try {
-      const prompt = `「${emotionName}」という感情について、以下の2点をJSON形式で生成してください。
-1. meaning: その感情の簡単な意味や説明（50文字程度）
-2. example: その感情を抱く具体的な状況の例文（1つ）`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              meaning: { type: Type.STRING },
-              example: { type: Type.STRING }
-            },
-            required: ["meaning", "example"]
-          }
-        }
+      const response = await fetch("/api/generate-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emotionName }),
       });
-
-      const jsonStr = response.text?.trim();
-      if (jsonStr) {
-        return JSON.parse(jsonStr);
-      }
+      if (response.ok) return await response.json();
     } catch (error) {
       console.error("Failed to generate details:", error);
     }
@@ -127,105 +98,29 @@ export default function App() {
 
   const checkDuplicate = async (input: string, existingNames: string[]) => {
     try {
-      const prompt = `以下の「新しい言葉」が、「既存の感情リスト」の中に、ひらがな・カタカナ・漢字の違いだけで実質的に同じ言葉として既に存在するかどうかを判定してください。
-例えば、「うれしい」と「嬉しい」、「かなしい」と「悲しい」は同じとみなします。
-
-新しい言葉: 「${input}」
-既存の感情リスト: ${JSON.stringify(existingNames)}
-
-JSON形式で返してください。
-isDuplicate: true または false
-matchedWord: 重複していると判定された既存の言葉（重複していない場合は空文字列）`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              isDuplicate: { type: Type.BOOLEAN },
-              matchedWord: { type: Type.STRING }
-            },
-            required: ["isDuplicate", "matchedWord"]
-          }
-        }
+      const response = await fetch("/api/check-duplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input, existingNames }),
       });
-
-      const jsonStr = response.text?.trim();
-      if (!jsonStr) return { isDuplicate: false, matchedWord: "" };
-      return JSON.parse(jsonStr);
+      if (response.ok) return await response.json();
     } catch (error) {
       console.error("Duplicate check failed:", error);
-      return { isDuplicate: false, matchedWord: "" };
     }
+    return { isDuplicate: false, matchedWord: "" };
   };
 
   const classifyEmotion = async (input: string) => {
-    try {
-      const prompt = `あなたは日本語の感情・心理状態の専門家AIです。
-国語辞典的な観点から、入力された言葉を以下の3つのカテゴリに分類してください。
-
-カテゴリ：
-1: 感情である (Emotion) - 心の中に生じる単一の感情
-  例: 嬉しい、悲しい、焦り、安心感、好き、嫌だ、恐怖、怒り
-2: 感情ではない (Not an emotion) - 物や行動、状況など
-  例: りんご、走る、机、明日、天気
-3: 複合感情状態である (Composite emotional state) - 複数の感情が重なり合った心理的な状態
-  例: ほっこりする、エモい、気忙しい、痛み、煩わしさ、忙しさ
-
-言葉: 「${input}」
-
-カテゴリが3の場合は、その状態を構成している感情を最大5つcomponentEmotionsにカンマ区切りの文字列で返してください。
-例: "温かさ,安らぎ,幸福感"`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash-exp",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              category: {
-                type: Type.INTEGER,
-                description: "1, 2, または 3のいずれか",
-              },
-              reason: {
-                type: Type.STRING,
-                description: "判定理由",
-              },
-              componentEmotions: {
-                type: Type.STRING,
-                description: "カテゴリ3の場合の構成感情をカンマ区切りで（例: 温かさ,安らぎ,幸福感）",
-              },
-            },
-            required: ["category", "reason", "componentEmotions"],
-          },
-        },
-      });
-
-      const jsonStr = response.text?.trim();
-      if (!jsonStr) throw new Error("Empty response from AI");
-
-      const result = JSON.parse(jsonStr);
-
-      // カンマ区切り文字列を配列に変換
-      const componentEmotionsArray = result.componentEmotions
-        ? result.componentEmotions.split(",").map((s: string) => s.trim()).filter((s: string) => s.length > 0)
-        : [];
-
-      return {
-        category: result.category as number,
-        reason: result.reason as string,
-        componentEmotions: componentEmotionsArray,
-      } as { category: number; reason: string; componentEmotions: string[] };
-    } catch (error: any) {
-      console.error("AI classification failed:", error);
-      const detail = error?.message || error?.toString() || "不明なエラー";
-      throw new Error(`AIによる判定に失敗しました: ${detail}`);
+    const response = await fetch("/api/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(`AIによる判定に失敗しました: ${err.detail || response.statusText}`);
     }
+    return await response.json() as { category: number; reason: string; componentEmotions: string[] };
   };
 
   const registerComponentEmotion = async (emotionName: string) => {

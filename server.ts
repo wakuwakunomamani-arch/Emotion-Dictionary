@@ -3,6 +3,7 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import admin from "firebase-admin";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -120,6 +121,17 @@ async function seedDatabase() {
 // Start seeding if DB is initialized
 seedDatabase();
 
+// Initialize Gemini AI
+let gemini: GoogleGenAI | null = null;
+const GEMINI_MODEL = "gemini-2.0-flash";
+
+if (process.env.GEMINI_API_KEY) {
+  gemini = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  console.log("Gemini AI initialized successfully.");
+} else {
+  console.warn("GEMINI_API_KEY not found. AI features will be unavailable.");
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -224,6 +236,128 @@ async function startServer() {
       res.status(201).json({ id: newDoc.id, ...newDoc.data() });
     } catch (error) {
       res.status(500).json({ error: "Failed to add emotion" });
+    }
+  });
+
+  // AI: 感情の詳細生成
+  app.post("/api/generate-details", async (req, res) => {
+    if (!gemini) return res.status(503).json({ error: "Gemini AI not configured" });
+    const { emotionName } = req.body;
+    if (!emotionName) return res.status(400).json({ error: "emotionName required" });
+    try {
+      const prompt = `「${emotionName}」という感情について、以下の2点をJSON形式で生成してください。
+1. meaning: その感情の簡単な意味や説明（50文字程度）
+2. example: その感情を抱く具体的な状況の例文（1つ）`;
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              meaning: { type: Type.STRING },
+              example: { type: Type.STRING }
+            },
+            required: ["meaning", "example"]
+          }
+        }
+      });
+      const jsonStr = response.text?.trim();
+      if (!jsonStr) throw new Error("Empty response from AI");
+      res.json(JSON.parse(jsonStr));
+    } catch (error: any) {
+      console.error("generate-details error:", error);
+      res.status(500).json({ error: "Failed to generate details", detail: error.message });
+    }
+  });
+
+  // AI: 重複チェック
+  app.post("/api/check-duplicate", async (req, res) => {
+    if (!gemini) return res.status(503).json({ isDuplicate: false, matchedWord: "" });
+    const { input, existingNames } = req.body;
+    if (!input) return res.status(400).json({ error: "input required" });
+    try {
+      const prompt = `以下の「新しい言葉」が、「既存の感情リスト」の中に、ひらがな・カタカナ・漢字の違いだけで実質的に同じ言葉として既に存在するかどうかを判定してください。
+例えば、「うれしい」と「嬉しい」、「かなしい」と「悲しい」は同じとみなします。
+
+新しい言葉: 「${input}」
+既存の感情リスト: ${JSON.stringify(existingNames)}
+
+JSON形式で返してください。
+isDuplicate: true または false
+matchedWord: 重複していると判定された既存の言葉（重複していない場合は空文字列）`;
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isDuplicate: { type: Type.BOOLEAN },
+              matchedWord: { type: Type.STRING }
+            },
+            required: ["isDuplicate", "matchedWord"]
+          }
+        }
+      });
+      const jsonStr = response.text?.trim();
+      if (!jsonStr) return res.json({ isDuplicate: false, matchedWord: "" });
+      res.json(JSON.parse(jsonStr));
+    } catch (error: any) {
+      console.error("check-duplicate error:", error);
+      res.json({ isDuplicate: false, matchedWord: "" });
+    }
+  });
+
+  // AI: 感情 vs 状態 分類
+  app.post("/api/classify", async (req, res) => {
+    if (!gemini) return res.status(503).json({ error: "Gemini AI not configured" });
+    const { input } = req.body;
+    if (!input) return res.status(400).json({ error: "input required" });
+    try {
+      const prompt = `あなたは日本語の感情・心理状態の専門家AIです。
+国語辞典的な観点から、入力された言葉を以下の3つのカテゴリに分類してください。
+
+カテゴリ：
+1: 感情である (Emotion) - 心の中に生じる単一の感情
+  例: 嬉しい、悲しい、焦り、安心感、好き、嫌だ、恐怖、怒り
+2: 感情ではない (Not an emotion) - 物や行動、状況など
+  例: りんご、走る、机、明日、天気
+3: 複合感情状態である (Composite emotional state) - 複数の感情が重なり合った心理的な状態
+  例: ほっこりする、エモい、気忙しい、痛み、煩わしさ、忙しさ
+
+言葉: 「${input}」
+
+カテゴリが3の場合は、その状態を構成している感情を最大5つcomponentEmotionsにカンマ区切りの文字列で返してください。
+例: "温かさ,安らぎ,幸福感"`;
+      const response = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              category: { type: Type.INTEGER, description: "1, 2, または 3のいずれか" },
+              reason: { type: Type.STRING, description: "判定理由" },
+              componentEmotions: { type: Type.STRING, description: "カテゴリ3の場合の構成感情をカンマ区切りで" }
+            },
+            required: ["category", "reason", "componentEmotions"]
+          }
+        }
+      });
+      const jsonStr = response.text?.trim();
+      if (!jsonStr) throw new Error("Empty response from AI");
+      const result = JSON.parse(jsonStr);
+      const componentEmotionsArray = result.componentEmotions
+        ? result.componentEmotions.split(",").map((s: string) => s.trim()).filter((s: string) => s.length > 0)
+        : [];
+      res.json({ category: result.category, reason: result.reason, componentEmotions: componentEmotionsArray });
+    } catch (error: any) {
+      console.error("classify error:", error);
+      res.status(500).json({ error: "Classification failed", detail: error.message });
     }
   });
 
